@@ -1,4 +1,4 @@
-# City of San Diego short-term rental license lottery
+# City of San Diego STRO license lottery
 
 This project contains the data and scripts for the City of San Diego's Tier 4 Short-Term Residential Occupancy license lottery.
 
