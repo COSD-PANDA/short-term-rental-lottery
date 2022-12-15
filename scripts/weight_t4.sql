@@ -63,4 +63,8 @@ from str_applicants_t4_points;
 select *
 from str_applicants_t4_lot;
 
+.output output/tier_4/applicants_weight_details_t4.csv
+select applicant_id,cpa,tot_cert_point,enforce_point,activity_point,tot_pay_point,weight
+from str_applicants_t4_points;
+
 .quit

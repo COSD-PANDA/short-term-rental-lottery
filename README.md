@@ -37,7 +37,7 @@ str-run-lottery.sh | Bash script to invoke lottery | *UniqueID*sandiego-strlotte
 
 To execute the lottery, browse to the *UniqueID*sandiego-strlottery-*env*-input S3 bucket. Upload a file ending in _t4.csv that contains raw applicant data. This data is not provided in this public repository to protect applicant privacy. 
 
-After about one minute, two files should appear within *UniqueID*sandiego-strlottery-*env*-output/tier4. One is applicants_weighted_t4.csv, which is the data file used in the lottery R script. This applicant data contains only application id, Community Planning Area, and total weight points, and it is available in this public repository for anyone who wants to reproduce the lottery results using the R script and the same seed number. The City's seed number was generated at runtime.
+After about one minute, two files should appear within *UniqueID*sandiego-strlottery-*env*-output/tier_4. One is applicants_weighted_t4.csv, which is the data file used in the lottery R script. This applicant data contains only application id, Community Planning Area, and total weight points, and it is available in this public repository for anyone who wants to reproduce the lottery results using the R script and the same seed number. The City's seed number was generated at runtime.
 
 The other output file is the lottery results. The official results are available on the City of San Diego [Open Data Portal](https://data.sandiego.gov).
 
