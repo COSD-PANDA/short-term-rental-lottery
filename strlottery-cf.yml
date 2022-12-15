@@ -1,0 +1,540 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Deploy the San Diego Short Term Rental Lottery environment to Amazon Web Services (AWS)
+
+# The Parameters block (below) specifies options for creating a new Lottery environment.
+# This ParameterGroup block groups them and provides descriptive labels.
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Purpose
+        Parameters:
+          - Env
+      - Label:
+          default: Lottery Server
+        Parameters:
+          - InstanceType
+          - LotteryAMIId
+      - Label:
+          default: Storage
+        Parameters:
+          - UniqueID
+         
+    ParameterLabels:
+      Env:
+        default: Environment 
+  
+Parameters:
+  Env: 
+    Type: String
+    Description: The environment to deploy.  Network addresses are automatically selected based on this.
+    AllowedValues: [dev,qa,prod]
+
+  UniqueID:
+    Type: String
+    Description: Leave blank for San Diego use.  Lower-case letters and numbers, ending in '-' if used.  A unique string to allow others to deploy this script without experiencing conflicts with San Diego storage naming.
+    Default: ''
+
+  InstanceType:
+    Description: Lottery server instance type
+    Type: String
+    Default: t3.small
+    AllowedValues: [
+      t3.micro, t3.small, t3.medium, t3.large, t3.xlarge, t3.2xlarge,
+      m5.large, m5.xlarge, m6i.large, m6i.xlarge]
+    ConstraintDescription: must be a valid EC2 instance type
+
+  LotteryAMIId:
+    Description: Base machine image for lottery server; default ending 653e is Cal Poly-provided with R and packages already installed
+    Type: String
+    Default: ami-020250e51792c653e
+    AllowedValues: [
+      ami-0c2ab3b8efb09f272, ami-020250e51792c653e ]
+    ConstraintDescription: must be an AMI compatible with the selected instance type
+
+Mappings: 
+  EnvSettings:
+    dev: 
+      CIDR: '172.22.20.0/27'
+    qa: 
+      CIDR: '172.22.20.32/27'
+    prod: 
+      CIDR: '172.22.20.64/27'
+
+
+Resources:
+  S3ScriptsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Sub '${UniqueID}sandiego-strlottery-${Env}-scripts'
+      VersioningConfiguration:
+        Status: Enabled
+
+  S3InputBucket:
+    Type: AWS::S3::Bucket
+    DependsOn: ProcessingLambdaPermission
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Sub '${UniqueID}sandiego-strlottery-${Env}-input'
+      VersioningConfiguration:
+        Status: Enabled
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:*
+            Function: !GetAtt ReceiveFileLambda.Arn
+            Filter:
+              S3Key:
+                Rules:
+                - Name: suffix
+                  Value: .csv
+
+  ProcessingLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !Ref ReceiveFileLambda
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub 'arn:aws:s3:::${UniqueID}sandiego-strlottery-${Env}-input'
+      SourceAccount: !Ref AWS::AccountId
+
+
+  S3OutputBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Sub '${UniqueID}sandiego-strlottery-${Env}-output'
+      VersioningConfiguration:
+        Status: Enabled
+
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !FindInMap [EnvSettings, !Ref Env, CIDR]
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${Env}-strlottery-vpc
+        - Key: Environment
+          Value: !Sub ${Env}
+        - Key: Department
+          Value: DoIT
+        - Key: Application 
+          Value: strlottery
+        - Key: VPC
+          Value: !Sub ${Env}-strlottery-vpc
+        - Key: Region
+          Value: !Sub '${AWS::Region}'
+
+  PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 1, !GetAZs '' ]
+      CidrBlock: !FindInMap [EnvSettings, !Ref Env, CIDR]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${Env}-strlottery-subnet-priv
+        - Key: Environment
+          Value: !Sub ${Env}
+        - Key: Department
+          Value: DoIT
+        - Key: Application 
+          Value: strlottery
+        - Key: VPC
+          Value: !Sub ${Env}-strlottery-vpc
+        - Key: Region
+          Value: !Sub '${AWS::Region}'
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${Env}-strlottery-routetable-priv
+        - Key: Environment
+          Value: !Sub ${Env}
+        - Key: Department
+          Value: DoIT
+        - Key: Application 
+          Value: strlottery
+        - Key: VPC
+          Value: !Sub ${Env}-strlottery-vpc
+        - Key: Region
+          Value: !Sub '${AWS::Region}'
+
+  PrivateSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnet
+
+  LotteryServer:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref 'InstanceType'
+      SubnetId: !Ref PrivateSubnet
+      IamInstanceProfile: !Ref EC2InstanceProfile 
+      SecurityGroupIds:
+        - !Ref SecurityGroupInstance
+      ImageId: !Ref 'LotteryAMIId'
+      Monitoring: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${Env}-strlottery-server
+        - Key: Environment
+          Value: !Sub ${Env}
+        - Key: Department
+          Value: DoIT
+        - Key: Application 
+          Value: strlottery
+        - Key: VPC
+          Value: !Sub ${Env}-strlottery-vpc
+        - Key: Region
+          Value: !Sub '${AWS::Region}'
+
+  SecurityGroupInstance:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable tightly limited access to server - for production, will be limited to SSM tasks
+      VpcId: !Ref VPC
+      SecurityGroupEgress:
+      # The SSM Agent connects to Session Manager over TCP 443, to allow secure access to run commands
+      - Description: allow outbound HTTPS to the VPC
+        CidrIp: !FindInMap [EnvSettings, !Ref Env, CIDR]
+        FromPort: 443
+        ToPort: 443
+        IpProtocol: tcp
+      - Description: allow outbound HTTPS to the VPC endpoints 
+        # this is the prefix for the us-west-2 S3 gateway
+        DestinationPrefixListId: 'pl-68a54001'
+        FromPort: 443
+        ToPort: 443
+        IpProtocol: tcp
+      Tags:
+        - Key: Name
+          Value: !Sub ${Env}-strlottery-private-sg
+        - Key: Environment
+          Value: !Sub ${Env}
+        - Key: Department
+          Value: DoIT
+        - Key: Application 
+          Value: strlottery
+        - Key: VPC
+          Value: !Sub ${Env}-strlottery-vpc
+        - Key: Region
+          Value: !Sub '${AWS::Region}'
+
+
+  SecurityGroupVpcEndpoint:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: SG for VPC Endpoints
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+      # The SSM Agent connects to Session Manager over TCP 443
+      - Description: allow inbound HTTPS from the private subnet
+        CidrIp: !FindInMap [EnvSettings, !Ref Env, CIDR]
+        FromPort: 443
+        ToPort: 443
+        IpProtocol: tcp
+      SecurityGroupEgress:
+      - Description: allow outbound HTTPS to the VPC
+        CidrIp: !FindInMap [EnvSettings, !Ref Env, CIDR]
+        FromPort: 443
+        ToPort: 443
+        IpProtocol: tcp
+      Tags:
+        - Key: Name
+          Value: !Sub ${Env}-strlottery-endpoint-sg
+        - Key: Environment
+          Value: !Sub ${Env}
+        - Key: Department
+          Value: DoIT
+        - Key: Application 
+          Value: strlottery
+        - Key: VPC
+          Value: !Sub ${Env}-strlottery-vpc
+        - Key: Region
+          Value: !Sub '${AWS::Region}'
+
+  VpcEndpointSSM:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ssm
+      VpcId: !Ref VPC
+      SubnetIds:
+        - !Ref PrivateSubnet
+      SecurityGroupIds:
+        - !Ref SecurityGroupVpcEndpoint
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: True
+
+  VpcEndpointSSMMessages:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ssmmessages
+      VpcId: !Ref VPC
+      SubnetIds:
+        - !Ref PrivateSubnet
+      SecurityGroupIds:
+        - !Ref SecurityGroupVpcEndpoint
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: True
+
+  VpcEndpointEC2Messages:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ec2messages
+      VpcId: !Ref VPC
+      SubnetIds:
+        - !Ref PrivateSubnet
+      SecurityGroupIds:
+        - !Ref SecurityGroupVpcEndpoint
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: True
+
+  S3GatewayEndpoint:
+    Type: 'AWS::EC2::VPCEndpoint'
+    Properties:
+      RouteTableIds:
+        - !Ref PrivateRouteTable
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
+      VpcId: !Ref VPC
+
+  EC2InstanceProfile: 
+    Type: AWS::IAM::InstanceProfile
+    Properties: 
+      Path: /
+      Roles: 
+        - !Ref EC2InstanceRole
+
+  EC2InstanceRole: 
+    Type: AWS::IAM::Role
+    Properties: 
+      AssumeRolePolicyDocument: 
+        Version: 2012-10-17
+        Statement: 
+          - 
+            Effect: Allow
+            Principal: 
+              Service: 
+                - ec2.amazonaws.com
+            Action: 
+              - sts:AssumeRole
+      Path: !Sub "/strlottery/${Env}/"
+      ManagedPolicyArns:
+        # The managed IAM policy AmazonSSMManagedInstanceCore grants access to Session Manager
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+      - PolicyName: S3LotteryAccessPolicy
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Action:
+              - 's3:ListBucket'
+              - 's3:GetObject'
+            Resource: 
+              - !Join ['', ['arn:aws:s3:::',!Ref UniqueID,'sandiego-strlottery-',!Ref Env,'-input'] ]
+              - !Join ['', ['arn:aws:s3:::',!Ref UniqueID,'sandiego-strlottery-',!Ref Env,'-input/*'] ]
+              - !Join ['', ['arn:aws:s3:::',!Ref S3ScriptsBucket] ]
+              - !Join ['', ['arn:aws:s3:::',!Ref S3ScriptsBucket,'/*'] ]
+              - !Join ['', ['arn:aws:s3:::',!Ref S3OutputBucket] ]
+              - !Join ['', ['arn:aws:s3:::',!Ref S3OutputBucket,'/*'] ]
+          - Effect: Allow
+            Action: 's3:PutObject'
+            Resource: !Join ['',['arn:aws:s3:::',!Ref S3OutputBucket,'/*'] ]
+
+
+  LambdaRole: 
+    Type: AWS::IAM::Role
+    Properties: 
+      AssumeRolePolicyDocument: 
+        Version: 2012-10-17
+        Statement: 
+          - 
+            Effect: Allow
+            Principal: 
+              Service: 
+                - lambda.amazonaws.com
+            Action: 
+              - sts:AssumeRole
+      Path: !Sub "/strlottery/${Env}/"
+      Policies:
+      - PolicyName: !Sub strlottery-${Env}-LambdaAccessPolicy
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Action:
+              - 's3:ListBucket'
+              - 's3:GetObject'
+            Resource: 
+              - !Join ['', ['arn:aws:s3:::',!Ref UniqueID,'sandiego-strlottery-',!Ref Env,'-input'] ]
+              - !Join ['', ['arn:aws:s3:::',!Ref UniqueID,'sandiego-strlottery-',!Ref Env,'-input/*'] ]
+              - !Join ['', ['arn:aws:s3:::',!Ref S3ScriptsBucket] ]
+              - !Join ['', ['arn:aws:s3:::',!Ref S3ScriptsBucket,'/*'] ]
+              - !Join ['', ['arn:aws:s3:::',!Ref S3OutputBucket] ]
+              - !Join ['', ['arn:aws:s3:::',!Ref S3OutputBucket,'/*'] ]
+          - Effect: Allow
+            Action: logs:CreateLogGroup
+            Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*
+          - Effect: Allow
+            Action: 
+              - logs:CreateLogStream
+              - logs:PutLogEvents 
+            Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${Env}-strlottery-receive-file-lambda:*
+          - Effect: Allow
+            Action: ssm:SendCommand
+            Resource: 
+              - arn:aws:ssm:*:*:document/AWS-RunShellScript
+              - !Join ['', ['arn:aws:ec2',':',!Ref AWS::Region,':',!Ref AWS::AccountId,':','instance/',!Ref LotteryServer] ]
+          - Effect: Allow
+            Action: ssm:GetCommandInvocation
+            Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:*
+
+  ReceiveFileLambda:
+    Type: AWS::Lambda::Function
+    Properties: 
+      FunctionName: !Sub ${Env}-strlottery-receive-file-lambda
+      Description: "Receive new files and run lottery algorithm"
+      Environment: 
+        Variables:
+          INSTANCE_ID: !Ref LotteryServer
+          SCRIPTS_DIRECTORY: "/home/ec2-user/Code/STR/"
+          INPUT_DIRECTORY: "/home/ec2-user/Code/STR/data/input/"
+          OUTPUT_DIRECTORY: "/home/ec2-user/Code/STR/data/output/"
+          SCRIPTS_BUCKET: !Ref S3ScriptsBucket
+          INPUT_BUCKET: !Sub '${UniqueID}sandiego-strlottery-${Env}-input'
+          OUTPUT_BUCKET: !Ref S3OutputBucket
+      Role: !GetAtt 'LambdaRole.Arn'
+      Runtime: python3.9
+      Timeout: 300
+      Handler: index.lambda_handler
+      Code:
+        ZipFile: |
+          import json
+          import urllib.parse
+          import boto3
+          import time
+          import os
+          
+          LOTTERY_SERVER = os.environ['INSTANCE_ID']
+          SCRIPTS_DIRECTORY = os.environ['SCRIPTS_DIRECTORY']
+          INPUT_DIRECTORY = os.environ['INPUT_DIRECTORY']
+          OUTPUT_DIRECTORY = os.environ['OUTPUT_DIRECTORY']
+          SCRIPTS_BUCKET = os.environ['SCRIPTS_BUCKET']
+          INPUT_BUCKET = os.environ['INPUT_BUCKET']
+          OUTPUT_BUCKET = os.environ['OUTPUT_BUCKET']
+          
+          s3 = boto3.client('s3')
+          ssm = boto3.client('ssm')
+           
+          def lambda_handler(event, context):
+              #print("Received event: " + json.dumps(event, indent=2))
+              
+              # Get the object from the event and show its content type
+              bucket = event['Records'][0]['s3']['bucket']['name']
+              key = urllib.parse.unquote_plus(event['Records'][0]['s3']['object']['key'], encoding='utf-8')
+              try:
+                  response = s3.get_object(Bucket=bucket, Key=key)
+                  print("INTEGRITY CHECKPOINT - Received input file " + bucket + "/" + key )
+
+                  # the random seed for the lottery will be the current time as expressed in integer seconds (epoch)
+                  # we calculate at start of run so it can be recorded in audit log with the intake metadata
+                  randomSeed = str(int(time.time()))
+
+                  metaData = {
+                      'eventTime' : event['Records'][0]['eventTime'],
+                      'ContentLength' : response.get('ContentLength'),
+                      'VersionId' : response.get('VersionId'),
+                      'ETag' : response.get('ETag').strip('"'), # remove extra enclosing quotes
+                      'ContentType' : response.get('ContentType'),
+                      'principalId' : event['Records'][0]['userIdentity']['principalId'],        
+                      'sourceIPAddress' : event['Records'][0]['requestParameters']['sourceIPAddress'],
+                      'randomSeed' : randomSeed
+                  }
+                  print(json.dumps(metaData,indent=2))
+                  
+                  # choose script to run based on name of input file
+                  if key.lower().endswith('t3.csv'):
+                    script = 'Stratified_Weighted_T3.R'
+                    print("CONTROL CHECKPOINT - file name " + key + " ends with t3.csv, run the Stratified Weighted Tier 3 Lottery script " + script)
+                  elif key.lower().endswith('t4.csv'):
+                    script = 'Weighted_T4.R'
+                    print("CONTROL CHECKPOINT - file name " + key + " ends with t4.csv, run the Weighted Tier 4 Lottery script " + script)
+                  else:
+                    # name does not include input type; we will log this activity but not run any script
+                    print("CONTROL CHECKPOINT - file name does not match a known type (t3.csv or t4.csv), STOPPING")
+                    return
+
+
+                  instance_id = LOTTERY_SERVER
+                  
+                  response = ssm.send_command(
+                      InstanceIds=[instance_id],
+                      DocumentName='AWS-RunShellScript',
+                      Parameters={
+                          'commands': [
+                              'runuser -l ec2-user -c \'aws --region=us-west-2 s3 cp s3://' + SCRIPTS_BUCKET + '/str-run-lottery.sh /home/ec2-user/Code/STR/ && chmod 755 /home/ec2-user/Code/STR/str-run-lottery.sh\'',
+                              'runuser -l ec2-user -c \'/home/ec2-user/Code/STR/str-run-lottery.sh ' + script + ' ' + key + ' ' + randomSeed + ' ' + INPUT_BUCKET + ' ' + OUTPUT_BUCKET + ' ' + SCRIPTS_BUCKET + '\''
+                          ]
+                      }
+                  )
+                  command_id = response['Command']['CommandId']
+                  tries = 0
+                  output = 'False'
+                  while tries < 10:
+                      tries = tries + 1
+                      try:
+                          time.sleep(1.0)  # wait for command to complete
+                          result = ssm.get_command_invocation(
+                              CommandId=command_id,
+                              InstanceId=instance_id,
+                          )
+                          if result['Status'] == 'InProgress':
+                              continue
+                          output = result['StandardOutputContent']
+                          print("INTEGRITY CHECKPOINT - output from Lottery Server:")
+                          print(output)
+                          break
+                      except ssm.exceptions.InvocationDoesNotExist:
+                          continue
+          
+                  return output == 'True'
+              
+                  # return response['ContentType']
+              except Exception as e:
+                  print(e)
+                  # print('Error getting object {} from bucket {}. Make sure they exist and your bucket is in the same region as this function.'.format(key, bucket))
+                  raise e
+
+      Tags:
+        - Key: Name
+          Value: !Sub ${Env}-strlottery-receive-file-lambda
+        - Key: Environment
+          Value: !Sub ${Env}
+        - Key: Department
+          Value: DoIT
+        - Key: Application 
+          Value: strlottery
+        - Key: VPC
+          Value: !Sub ${Env}-strlottery-vpc
+        - Key: Region
+          Value: !Sub '${AWS::Region}'
+
+Outputs:
+  StackName:
+    Description: Stack name
+    Value: !Sub '${AWS::StackName}'
+  VPC:
+    Description: VPC
+    Value: !Ref VPC
+  LotteryServer:
+    Description: EC2 instance for running lottery algorithm
+    Value: !Ref LotteryServer
