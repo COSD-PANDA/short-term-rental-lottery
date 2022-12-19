@@ -43,4 +43,8 @@ The other output file is the lottery results. The official results are available
 
 ### Lottery R script
 
-To reproduce the exact results for the official City lottery, you will need to run the lottery R script, Weighted_T4.R, using the same seed number. The script requires two arguments: the name of the input file, and the seed number. The official lottery seed number is `1671165508`.
+To reproduce the exact results for the official City lottery, you will need to run the lottery R script, Weighted_T4.R, using the same seed number and input data. The script requires two arguments: the name of the input file, and the seed number. The official lottery seed number is `1671165508`.
+
+Example command: `Rscript Weighted_T4.R applicants_weighted_t4.csv 1671165508`
+
+If running in R Studio, replace lines 16 and 17 with their respective values.
