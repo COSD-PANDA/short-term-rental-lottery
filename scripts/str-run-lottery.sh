@@ -4,6 +4,7 @@ if [ $# -ne 6 ]; then
 	exit -1
 fi
 
+# Example arguments
 # Weighted_T4.R accela_extract_t4.csv 12345678 1234-sandiego-strlottery-dev-input 1234-sandiego-strlottery-dev-output 1234-sandiego-strlottery-dev-scripts
 
 # receive arguments from Lambda function

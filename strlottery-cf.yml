@@ -2,6 +2,8 @@ AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: Deploy the San Diego Short Term Rental Lottery environment to Amazon Web Services (AWS)
 
+# Note: This template works in the us-west-2 region and may need to be updated for other regions
+
 # The Parameters block (below) specifies options for creating a new Lottery environment.
 # This ParameterGroup block groups them and provides descriptive labels.
 Metadata:
