@@ -39,7 +39,7 @@ To execute the lottery, browse to the *UniqueID*sandiego-strlottery-*env*-input 
 
 After about one minute, two files should appear within *UniqueID*sandiego-strlottery-*env*-output/tier_4. One is applicants_weighted_t4.csv, which is the data file used in the lottery R script. This applicant data contains only application id, Community Planning Area, and total weight points, and it is available in this public repository for anyone who wants to reproduce the lottery results using the R script and the same seed number. The City's seed number was generated at runtime.
 
-The other output file is the lottery results. The official results are available on the City of San Diego [Open Data Portal](https://data.sandiego.gov).
+The other output file is the lottery results. The official results are available in a City of San Diego [Tableau dashboard](https://public.tableau.com/views/STROTier4lotteryresults/STROApplications?:language=en-US&publish=yes&:display_count=n&:origin=viz_share_link). For questions about lottery results, please contact panda@sandiego.gov.
 
 ### Lottery R script
 
